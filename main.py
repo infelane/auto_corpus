@@ -51,15 +51,18 @@ def table_gen(body):
 
         else:
 
-            row = []
-            for c in l:
+            row = {}
+            for i_c, c in enumerate(l):
 
                 if 0 and (len(c) > 1):
                     print(c)  # Enters
 
-                row_i = ';'.join(c)
+                if i_c == 0:    # naam
+                    row_i = c[0]    # Only before enter
+                else:
+                    row_i = ';'.join(c)
 
-                row.append(row_i)
+                row[titles[i_c]] = row_i
 
             d.append(row)
 
@@ -75,23 +78,58 @@ def table_gen(body):
 
     # for
 
-    caption_gen(df.iloc[0])
+    l_titles = []
+    for i, df_i in df.iterrows():
+        try:
+            s = caption_gen(df_i) # df.iloc[0])
+        except Exception as e:
+            print(e)
+            s = 'FAIL'
+        l_titles.append(s)
+    df_titles = pd.DataFrame(l_titles)
+    df_titles.to_csv('C:/Users/Laurens_laptop_w/Downloads/corpus.csv', index=True, sep=';')
 
     return df
 
 
-def caption_gen(x):
+def caption_gen(x, debug=False):
 
-    print(x)
-
-    s = ''
+    if debug:
+        print(x)
 
     # First name, last name
     s_name = x['KUNSTENAAR']
-    name_last, name_first = map(str.strip, s_name.split(';')[0].split('(')[0].split(',', 1))
+
+    if s_name.strip() == '':
+        print("Failed to make title", x)
+        return ''  # Early stop
+
+    s_name0 = s_name.split(';')[0]
+    name_last, name_first = map(str.strip, s_name0.split('(')[0].split(',', 1))
     s0 = name_first + ' ' + name_last
 
-    s += s0
+    s_titel = x['TITEL']
+
+    s_type = x['TYPE EN FORMAAT']
+
+    s_type.split(',')
+
+    if s_type == '/':
+        s_mat_formaat = 'afmetingen onbekend'
+    else:
+        s_mat_formaat = s_type
+
+    s_bewaarplaats = x['BEWAARPLAATS/EIGENAAR']
+    if s_bewaarplaats == '/':
+        s_col = 'bewaarplaats onbekend'
+    else:
+        s_col = s_bewaarplaats
+
+    x_dat = x['DATUM'].strip()
+    s_datum = 'datum onbekend' if x_dat == 's.d.' else x_dat
+
+    # Naam, titel, datum, materiaal, formaat, collectie
+    s = f'{s0}, {s_titel}, {s_datum}, {s_mat_formaat}, {s_col}'
 
     print(s)
 
