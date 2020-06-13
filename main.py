@@ -2,11 +2,14 @@
 Generate subscript of image
 """
 
+import os
+
 import numpy as np
 import pandas as pd
 
 # import docx2txt     # Just single string, not really interesting
 from docx2python import docx2python
+import openpyxl
 
 
 # Read the doc
@@ -38,7 +41,7 @@ def doc_reader(filepath):
 
 def single_line(b, s=';'):
     if isinstance(b, list):
-        return s.join([single_line(b_i).strip() for b_i in b])
+        return s.join([single_line(b_i, s).strip() for b_i in b])
     else:
         return b
 
@@ -46,13 +49,19 @@ def single_line(b, s=';'):
 # Generate table (pandas?)
 def table_gen(body):
 
-    d = []
+    if len(body[0]) == 1:    # Painter grouped
+        titles = [a[0].lower().strip() for a in body[1][0]]
+    else:
+        titles = [a[0].lower().strip() for a in body[0][0]]
 
-    titles = [a[0].lower().strip() for a in body[0][0]]
     if titles[0] == '':   # index
         titles[0] = 'index'
 
-    i_naam = titles.index('kunstenaar')
+    if 'kunstenaar' in titles:
+        i_naam = titles.index('kunstenaar')
+    else:
+        i_naam = None
+
     i_titel = titles.index('titel')
     i_index = 0
     i_datum = titles.index('datum')
@@ -62,56 +71,111 @@ def table_gen(body):
     def check_if_title(l):
         return single_line(l[1]).lower() == titles[1]
 
-    assert single_line(body[1]) == '', body[1]
+    def body_work(body_i, author=None):
+        d = []
+        for i, l1 in enumerate(body_i):
 
-    for i, l in enumerate(body[0]):
+            if check_if_title(l1):  #
+                continue
 
-        if check_if_title(l):  #
+            else:
+
+                row = {}
+
+                if author is not None:  # For the other file
+                    row["kunstenaar"] = author
+
+                for i_c, c in enumerate(l1):
+
+                    if 0 and (len(c) > 1):
+                        print(c)  # Enters
+
+                    if i_c in (i_naam, i_titel):  # naam
+                        row_i = c[0]  # Only before enter
+                        # Remove "birth/death"
+                        row_i = row_i.split("(")[0].strip()
+
+                        if ((i_c == i_naam) and (author is None)) or \
+                                ((i_c == i_titel) and (author is not None)):  # add everything after the name
+                            # All the rest, to single
+
+                            l1 = single_line(c[1:], ' ').strip()
+
+                            # Handle html < > stuff!
+                            l2 = ''
+                            for l_i in l1.split("<"):
+                                l2 += l_i.split(">", 1)[-1]
+
+                            l1 = l2
+
+                            row['verantwoording'] = remove_double_space(l1)
+
+                    elif i_c == i_index:  # Index!
+                        row_i = int(single_line(c))
+
+                    elif i_c in (i_datum, i_typeformaat):
+                        row_i = single_line(c, ' ').lower()  # Shouldn't contain higher cases!
+
+                    elif i_c == i_afbeelding:
+                        continue  # Do nothing
+
+                    else:
+                        # Should be single line
+
+                        row_i = single_line(c, ' ')
+
+                    row[titles[i_c]] = row_i
+
+                d.append(row)
+
+        return d
+
+    d = []
+
+    author = None
+    for body_i in body:
+
+        if len(body_i) == 1:    # Artists grouped:
+
+            naam = single_line(body_i, '').lower()
+
+            if naam == "":
+                continue     # Empty
+
+            if "henri" in naam:
+                naam = "De Braekeleer, Henri"
+
+            # TODO other 2
+            elif "xavier" in naam:
+                naam = "Mellery, Xavier"
+
+            elif "smet" in naam:
+                naam = "De Smet, Léon"
+
+            else:
+                raise ValueError(naam)
+
+            author = naam
             continue
 
-        else:
+        d_i = body_work(body_i, author=author)
+        d.extend(d_i)
 
-            row = {}
-            for i_c, c in enumerate(l):
+    df = pd.DataFrame(d,
+                      # columns=titles  # Might forget some extra keys if uncommenting
+                      )
 
-                if 0 and (len(c) > 1):
-                    print(c)  # Enters
+    return df
 
-                if i_c in (i_naam, i_titel):    # naam
-                    row_i = c[0]    # Only before enter
-                    # Remove "birth/death"
-                    row_i = row_i.split("(")[0].strip()
 
-                elif i_c == i_index:    # Index!
-                    row_i = int(single_line(c))
+def check_alphabetical(df):
+    # check alphabetical
 
-                elif i_c in (i_datum, i_typeformaat):
-                    row_i = single_line(c, ' ').lower()  # Shouldn't contain higher cases!
-
-                elif i_c == i_afbeelding:
-                    continue    # Do nothing
-
-                else:
-                    # Should be single line
-
-                    row_i = single_line(c, ' ')
-
-                row[titles[i_c]] = row_i
-
-            d.append(row)
-
-    df = pd.DataFrame(d, columns=titles)
-
-    # Check if index is ok:
-    for i, df_i in df.iterrows():
-        if  df_i['index'] != i + df['index'][0]:
-            print("at", df_i['index'], 'should be:', i + df['index'][0])
-
-    # TODO check alphabetical
+    # To lower case
     list_lastfirstname = [a.lower() for a in list(df['kunstenaar'])]
     list_lastfirstname_sorted = sorted(list_lastfirstname)
-    # To lower case
 
+    # Check empty fields
     for i, a in enumerate(list_lastfirstname):
         if a == '':
             print(i, a)
@@ -120,6 +184,20 @@ def table_gen(body):
         if a != b:
             print("Error")
             print(i+1, a, '!=', b)
+
+
+def processing(df):
+
+    # Check if index is ok:
+    for i, df_i in df.iterrows():
+        if df_i['index'] != i + df['index'][0]:
+            print("at", df_i['index'], 'should be:', i + df['index'][0])
+
+    if 1:
+        count_author(df)
+
+    if 1:
+        gen_verantwoording(df)
 
     # print(df)
 
@@ -137,10 +215,46 @@ def table_gen(body):
 
     df_titles = pd.DataFrame(l_titles)
     # df_titles.to_csv('C:/Users/Laurens_laptop_w/Downloads/corpus.csv', index=True, sep=';')
-    df_titles.to_excel(r'C:/Users/Laurens_laptop_w/Downloads/corpus.xlsx', index=False)
+    df_titles.to_excel(os.path.join(folder, 'corpus.xlsx'), index=False)
 
     return df
 
+
+def sort_df(df, column, key):
+    '''Takes dataframe, column index and custom function for sorting,
+    returns dataframe sorted by this column using this function'''
+
+    temp = {i: key(df[column][i]) for i in df.index}
+
+    return df.iloc[sorted(temp, key=lambda x: temp[x])]
+
+
+def count_author(df):
+
+    df_kunstenaar = sort_df(df, "kunstenaar", str.lower).groupby('kunstenaar', sort=False).size()
+
+    df_kunstenaar.to_excel(os.path.join(folder, 'kunstenaars_tellen_base.xlsx'))
+
+
+def gen_verantwoording(df):
+
+    a = df['verantwoording']
+    print(a)
+
+    l_verantwoording_safe = []
+
+    for _, a in df.iterrows():
+        # print(a)
+
+        s = f"catalogus nummer {a['index']}: {a['verantwoording']}"
+
+        l_verantwoording_safe.append(s)
+
+    df_verantwoording_safe = pd.DataFrame(l_verantwoording_safe)
+
+    df_verantwoording_safe.to_excel(os.path.join(folder, 'cat_verantwoording.xlsx'), index=False, header=False)
+
+    return
 
 def caption_gen(x, debug=False):
 
@@ -188,10 +302,30 @@ def caption_gen(x, debug=False):
     return s
 
 
-if __name__ == '__main__':
-    f1 = 'CorpusKunstwerkenPerKunstenaarV2 (1).docx'
-    f2 = 'CorpusOverzichtKunstwerkenV4_2.docx'
-    # TODO also 'per_kunstenaar'
-    body = doc_reader('C:/Users/Laurens_laptop_w/Downloads/' + f2)
+def remove_double_space(s):
+    return ' '.join(s.split())
 
-    df = table_gen(body)
+
+if __name__ == '__main__':
+    folder = 'C:/Users/admin/Downloads' # 'C:/Users/Laurens_laptop_w/Downloads/'
+
+    f1 = 'CorpusKunstwerkenPerKunstenaarV4.docx'   # 'CorpusKunstwerkenPerKunstenaarV2 (1).docx'
+    f2 = 'CorpusOverzichtKunstwerkenV6.docx'   # 'CorpusOverzichtKunstwerkenV4_2.docx'
+    # TODO also 'per_kunstenaar'
+
+    body1 = doc_reader(os.path.join(folder, f1))
+    df1 = table_gen(body1)
+
+    # check_alphabetical(df1)
+
+    body2 = doc_reader(os.path.join(folder, f2))
+    df2 = table_gen(body2)
+
+    check_alphabetical(df2)
+
+    df = pd.concat([df2, df1], ignore_index=True)
+
+    processing(df)
+
+    # TODO generate df for both files
+    # TODO join both files
